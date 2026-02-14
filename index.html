@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ОС дня</title>
+<style>
+  body{font-family:sans-serif;background:#0f1115;color:#e6e6e6;padding:12px}
+  #nowBox{background:#1b1f27;padding:14px;border-radius:14px;margin-bottom:12px}
+  #action{font-size:20px;font-weight:bold;margin-top:6px}
+  #avoid{opacity:.8;margin-top:4px}
+  .grid{display:grid;grid-template-columns:180px repeat(7,1fr);gap:4px;margin-top:12px}
+  .cell{padding:6px;text-align:center;border-radius:8px;background:#1b1f27;display:flex;align-items:center;justify-content:center}
+  .header{background:#2a3040;font-weight:bold}
+  .done{background:#2b6a62}
+  input[type="checkbox"]{transform:scale(1.2)}
+  button{margin-top:8px;margin-right:6px;padding:6px 12px;border:none;border-radius:8px;background:#2a3040;color:white}
+  #modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center}
+  #modalBox{background:#1b1f27;padding:16px;border-radius:14px;max-width:380px;white-space:pre-line}
+  .small{opacity:.8;font-size:13px;margin-top:6px}
+</style>
+</head>
+<body>
+
+<h2>Сейчас</h2>
+<div id="nowBox">
+  <div id="time"></div>
+  <div id="block"></div>
+  <div id="energy"></div>
+  <div id="action"></div>
+  <div id="avoid"></div>
+</div>
+
+<div>
+  <button onclick="setEnergy('energy')">Бодрый</button>
+  <button onclick="setEnergy('ok')">Нормально</button>
+  <button onclick="setEnergy('tired')">Устал</button>
+  <button onclick="setEnergy('over')">Перегружен</button>
+</div>
+
+<div class="small">Галочки — обзор недели</div>
+<div id="board" class="grid"></div>
+
+<div id="modal">
+  <div id="modalBox">
+    <div id="modalText"></div>
+    <button onclick="closeModal()">Закрыть</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  var days=["Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
+  var energy = (localStorage.getItem('energy') || 'ok');
+
+  // РАБОЧИЕ ДНИ (ПН–ПТ)
+  var workSchedule=[
+    {key:'morning',title:'Утро',start:6.5,end:8.5,action:'вода + свет + разминка',avoid:'не брать телефон'},
+    {key:'commute_in',title:'Дорога',start:8.5,end:9.0,action:'спокойный вход в день',avoid:'не новости'},
+    {key:'work1',title:'Фокус',start:9.0,end:11.0,action:'главная задача',avoid:'не отвлекаться'},
+    {key:'break',title:'Перерыв',start:11.0,end:11.2,action:'движение + вода',avoid:'не соцсети'},
+    {key:'work2',title:'Работа',start:11.2,end:13.0,action:'закрывать задачи',avoid:'не начинать новое'},
+    {key:'lunch',title:'Обед',start:13.0,end:14.0,action:'есть спокойно',avoid:'без телефона'},
+    {key:'work3',title:'Работа',start:14.0,end:16.5,action:'довести до результата',avoid:'не перфекционизм'},
+    {key:'break2',title:'Микроперерыв',start:16.5,end:16.7,action:'2–5 мин движения',avoid:'не лента'},
+    {key:'work4',title:'Лёгкие задачи',start:16.7,end:18.0,action:'рутина + подготовка',avoid:'не сложное'},
+    {key:'reset',title:'Сброс',start:18.0,end:19.0,action:'переключение',avoid:'не думать о работе'},
+    {key:'learn',title:'Учёба',start:19.5,end:20.5,action:'развитие навыков',avoid:'не требовать идеала'},
+    {key:'sleepPrep',title:'Подготовка ко сну',start:21.0,end:22.0,action:'снижение стимулов',avoid:'без новостей'},
+    {key:'sleep',title:'Сон',start:22.0,end:24.0,action:'сон',avoid:'не телефон'}
+  ];
+
+  // ВЫХОДНЫЕ (СБ–ВС) — БЕЗ РАБОТЫ
+  var weekendSchedule=[
+    {key:'wake',title:'Спокойное утро',start:8.0,end:10.0,action:'медленный старт дня',avoid:'не спешить'},
+    {key:'move',title:'Движение',start:10.0,end:12.0,action:'прогулка / спорт',avoid:'не сидеть дома весь день'},
+    {key:'life',title:'Личные дела',start:12.0,end:16.0,action:'семья / бытовое',avoid:'не работать'},
+    {key:'rest',title:'Отдых',start:16.0,end:18.0,action:'восстановление',avoid:'не задачи'},
+    {key:'growth',title:'Развитие',start:18.0,end:19.5,action:'чтение / обучение',avoid:'не насиловать себя'},
+    {key:'evening',title:'Вечер',start:19.5,end:21.0,action:'замедление',avoid:'не стимулы'},
+    {key:'sleepPrep',title:'Подготовка ко сну',start:21.0,end:22.0,action:'гигиена сна',avoid:'не экран'},
+    {key:'sleep',title:'Сон',start:22.0,end:24.0,action:'сон',avoid:'не телефон'}
+  ];
+
+  function isWeekend(){
+    var d=new Date().getDay();
+    return d===6 || d===0;
+  }
+
+  function getSchedule(){
+    return isWeekend()? weekendSchedule : workSchedule;
+  }
+
+  function nowHour(){
+    var d=new Date();
+    return d.getHours()+d.getMinutes()/60;
+  }
+
+  function findCurrentBlock(){
+    var t=nowHour();
+    var schedule=getSchedule();
+    for(var i=0;i<schedule.length;i++){
+      if(t>=schedule[i].start && t<schedule[i].end) return schedule[i];
+    }
+    return null;
+  }
+
+  function findNextBlock(){
+    var t=nowHour();
+    var schedule=getSchedule();
+    for(var i=0;i<schedule.length;i++){
+      if(t<schedule[i].start) return schedule[i];
+    }
+    return schedule[0];
+  }
+
+  function renderNow(){
+    var t=new Date();
+    document.getElementById('time').innerText=t.toLocaleTimeString();
+
+    var b=findCurrentBlock();
+    if(!b){
+      b=findNextBlock();
+      document.getElementById('block').innerText='Следующий блок: '+b.title;
+    } else {
+      document.getElementById('block').innerText='Блок: '+b.title;
+    }
+
+    document.getElementById('energy').innerText='Состояние: '+energy;
+
+    var action=b.action;
+    var avoid=b.avoid;
+
+    if(energy==='over'){
+      action='Сброс: вода + дыхание + движение';
+      avoid='не принимать решения';
+    }
+    if(energy==='tired' && b.key.indexOf('work')===0){
+      action='работать по 25 минут';
+      avoid='не гнаться за результатом';
+    }
+
+    document.getElementById('action').innerText='Действие: '+action;
+    document.getElementById('avoid').innerText='Не делать: '+avoid;
+  }
+
+  window.setEnergy=function(e){
+    energy=e;
+    localStorage.setItem('energy',e);
+    renderNow();
+  };
+
+  window.closeModal=function(){
+    document.getElementById('modal').style.display='none';
+  };
+
+  function weekKey(){
+    var d=new Date();
+    var day=d.getDay();
+    var diff=(day===0 ? -6 : 1-day);
+    var monday=new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    monday.setDate(monday.getDate()+diff);
+    return monday.toISOString().slice(0,10);
+  }
+
+  function loadChecks(){
+    try{ return JSON.parse(localStorage.getItem('checks_'+weekKey())||'{}'); }
+    catch(e){ return {}; }
+  }
+
+  function saveChecks(c){
+    localStorage.setItem('checks_'+weekKey(), JSON.stringify(c));
+  }
+
+  function renderBoard(){
+    var board=document.getElementById('board');
+    var checks=loadChecks();
+    var schedule=getSchedule();
+
+    board.innerHTML='<div class="cell header"></div>'+days.map(function(d){return '<div class="cell header">'+d+'</div>';}).join('');
+
+    for(var r=0;r<schedule.length;r++){
+      var b=schedule[r];
+      board.innerHTML += '<div class="cell">'+b.title+'</div>';
+      for(var i=0;i<7;i++){
+        var key=b.key+'_'+i;
+        var checked=!!checks[key];
+        board.innerHTML += '<div class="cell '+(checked?'done':'')+'"><input type="checkbox" '+(checked?'checked':'')+' id="'+key+'"></div>';
+      }
+    }
+
+    for(var r2=0;r2<schedule.length;r2++){
+      var b2=schedule[r2];
+      for(var i2=0;i2<7;i2++){
+        (function(blockKey, dayIndex){
+          var key2=blockKey+'_'+dayIndex;
+          var el=document.getElementById(key2);
+          if(!el) return;
+          el.addEventListener('change',function(){
+            checks[key2]=el.checked;
+            saveChecks(checks);
+            var cell=el.parentNode;
+            if(cell){
+              if(el.checked) cell.className='cell done';
+              else cell.className='cell';
+            }
+          });
+        })(b2.key, i2);
+      }
+    }
+  }
+
+  renderBoard();
+  renderNow();
+  setInterval(renderNow, 60000);
+})();
+</script>
+
+</body>
+</html>
